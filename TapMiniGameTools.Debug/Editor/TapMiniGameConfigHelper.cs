@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-#if UNITY_2022_2_OR_NEWER || TUANJIE_1_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER|| TUANJIE_1_0_OR_NEWER
 using UnityEditor.Build.Profile;
 #endif
 
@@ -27,7 +27,7 @@ namespace TapTapMiniGame.Editor
             
             try
             {
-#if UNITY_2022_2_OR_NEWER || TUANJIE_1_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER|| TUANJIE_1_0_OR_NEWER
                 LoadBuildProfiles(buildProfiles);
 #endif
                 
@@ -111,7 +111,7 @@ namespace TapTapMiniGame.Editor
             string appId = null;
 
             // 优先级1：尝试从 Build Profile 读取 appId (Unity 2022+/团结引擎)
-#if UNITY_2022_2_OR_NEWER || TUANJIE_1_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER|| TUANJIE_1_0_OR_NEWER
             appId = LoadAppIdFromBuildProfile(buildProfile.profilePath);
             if (!string.IsNullOrEmpty(appId))
             {
@@ -153,7 +153,7 @@ namespace TapTapMiniGame.Editor
             return null;
         }
 
-#if UNITY_2022_2_OR_NEWER || TUANJIE_1_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER|| TUANJIE_1_0_OR_NEWER
         /// <summary>
         /// 从 Build Profile 中读取 appId (Unity 2022+/团结引擎)
         /// </summary>
@@ -294,7 +294,7 @@ namespace TapTapMiniGame.Editor
             }
         }
 
-#if UNITY_2022_2_OR_NEWER || TUANJIE_1_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER|| TUANJIE_1_0_OR_NEWER
         private static void LoadBuildProfiles(List<BuildProfileInfo> buildProfiles)
         {
             string buildProfilesPath = "Assets/Settings/Build Profiles";
