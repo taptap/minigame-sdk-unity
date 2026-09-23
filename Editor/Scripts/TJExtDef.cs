@@ -110,6 +110,13 @@ namespace TapTapMiniGame
 #else
             TJExtEnvDef.SETDEF("TUANJIE_1_8_OR_NEWER", false);
 #endif
+            // 团结引擎 tj 1.11 起 minigame/webgl/playableads 平台升级 emscripten 版本，
+            // 对应 custom build 引擎（2022.3.62t17 及以后）会定义该宏，需要透传给转换产物。
+#if TUANJIE_EMSCRIPTEN_3_1_39
+            TJExtEnvDef.SETDEF("TUANJIE_EMSCRIPTEN_3_1_39", true);
+#else
+            TJExtEnvDef.SETDEF("TUANJIE_EMSCRIPTEN_3_1_39", false);
+#endif
             RegisterController();
         }
         
