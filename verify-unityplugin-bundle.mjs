@@ -121,15 +121,23 @@ function main() {
     hashOk ? '与 EXPECTED_BUNDLE_SHA256 一致' : `预期 ${EXPECTED_BUNDLE_SHA256.slice(0, 12)}… 实际 ${actualHash.slice(0, 12)}…`,
   ]);
 
-  // 3. bundle 有改动时必须同步记录变更。
-  //    注意这里不做 hash 的重复断言：上面的 hashOk 已无条件校验，若再拿它拼一条
-  //    与 BUNDLE_CHANGED 相与的断言，在 BUNDLE_CHANGED 为真时完全等价、为假时恒过，
-  //    属于无独立信息的冗余检查。bundle 变更时真正的缺口是变更记录。
-  if (BUNDLE_CHANGED) {
+  // 3. bundle 有变更时必须能看到同一批变更里的 CHANGELOG 更新。
+  //
+  //    两个信号取并集，而不是只取其一：
+  //    - BUNDLE_CHANGED：本次变更范围里包含 bundle 文件（workflow 传入）
+  //    - !hashOk：bundle 实际内容与预期 sha256 不符
+  //    只取 BUNDLE_CHANGED 会漏掉“范围推断失败导致漏检”的情况；
+  //    只取 hashOk 会漏掉“换了 bundle 同时也改了预期 hash、但没写 CHANGELOG”的情况
+  //    （更新预期 hash 本就是换 bundle 的正常步骤，此时 hashOk 仍为 true）。
+  //    并集对两种情况都失败安全，代价是极少数场景下多要求一次 CHANGELOG 记录。
+  const needsChangelog = BUNDLE_CHANGED || !hashOk;
+  if (needsChangelog) {
     checks.push([
       'bundle 变更时同步更新了 CHANGELOG',
       CHANGELOG_CHANGED,
-      CHANGELOG_CHANGED ? 'CHANGELOG.md 有改动' : '缺少 CHANGELOG.md 变更',
+      CHANGELOG_CHANGED
+        ? 'CHANGELOG.md 有改动'
+        : `缺少 CHANGELOG.md 变更（${BUNDLE_CHANGED ? '变更范围内含 bundle' : 'bundle 内容与预期不符'}）`,
     ]);
   } else {
     console.log('INFO  本次未变更 bundle，跳过 CHANGELOG 核对');

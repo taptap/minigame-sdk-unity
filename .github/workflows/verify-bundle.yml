@@ -40,25 +40,79 @@ jobs:
         id: detect
         shell: bash
         run: |
-          set -euo pipefail
+          # 说明：bundle 的门禁本身以内容 sha256 为准（见 verify-unityplugin-bundle.mjs），
+          # 这里只负责回答“本次推送/PR 是否更新过 CHANGELOG”，用于内容不符时核对变更记录。
+          # 范围无法确定时明确失败，而不是静默跳过 —— 静默跳过会让该核对形同虚设。
+          set -uo pipefail
+
           bundle='Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
           changelog='CHANGELOG.md'
+          event='${{ github.event_name }}'
+          succeeded='false'
+          changed_files=''
+
+          diff_range() {
+            local old="$1" new="$2" out
+            git rev-parse --verify --quiet "${old}^{commit}" >/dev/null || return 1
+            git rev-parse --verify --quiet "${new}^{commit}" >/dev/null || return 1
+            out=$(git diff --name-only "$old" "$new") || return 1
+            printf '%s' "$out"
+          }
+
+          if [ "$event" = 'pull_request' ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            if changed_files=$(diff_range "$base" 'HEAD'); then
+              succeeded='true'
+            else
+              # base 不可达时退回与目标分支的合并基点
+              git fetch --quiet origin '${{ github.base_ref }}' || true
+              if changed_files=$(diff_range 'FETCH_HEAD' 'HEAD'); then
+                succeeded='true'
+              fi
+            fi
+          elif [ "$event" = 'push' ]; then
+            before='${{ github.event.before }}'
+            after='${{ github.event.after }}'
+            if [ -n "$before" ] && ! printf '%s' "$before" | grep -qE '^0+$'; then
+              # 常规推送：用推送前后的范围
+              if changed_files=$(diff_range "$before" "$after"); then
+                succeeded='true'
+              fi
+            else
+              # 新建分支：用推送后提交与其父提交的范围，覆盖整次推送
+              if changed_files=$(diff_range "${after}^" "$after"); then
+                succeeded='true'
+              fi
+            fi
+            if [ "$succeeded" != 'true' ]; then
+              # 非快进推送（历史改写）时 before 可能已不可达；fetch-depth 0 也不保证能取到
+              # 不可达的历史提交，此时退回“主分支相对 HEAD 的变更”，保留整批变更。
+              if changed_files=$(diff_range 'HEAD^' 'HEAD'); then
+                succeeded='true'
+              fi
+            fi
+          else
+            # 其他事件（如手工触发）没有可比对的范围，按全部变更处理，宁可多要求一次记录
+            succeeded='true'
+          fi
+
+          if [ "$succeeded" != 'true' ]; then
+            echo "::error::无法确定本次变更范围，无法完成 CHANGELOG 核对（bundle 内容门禁仍会独立执行）"
+            exit 1
+          fi
+
           changed='false'
           changelog_changed='false'
-          if [ "${{ github.event_name }}" = 'pull_request' ]; then
-            base='${{ github.event.pull_request.base.sha }}'
-            changed_files=$(git diff --name-only "$base" HEAD)
-            if echo "$changed_files" | grep -qx "$bundle"; then
-              changed='true'
-            fi
-            if echo "$changed_files" | grep -qx "$changelog"; then
-              changelog_changed='true'
-            fi
+          if [ -n "$changed_files" ]; then
+            printf '%s\n' "$changed_files" | grep -qx "$bundle" && changed='true' || true
+            printf '%s\n' "$changed_files" | grep -qx "$changelog" && changelog_changed='true' || true
           fi
+
           {
             echo "changed=$changed"
             echo "changelog_changed=$changelog_changed"
           } >> "$GITHUB_OUTPUT"
+          echo "event: $event"
           echo "bundle changed: $changed / changelog changed: $changelog_changed"
 
       - name: 运行 bundle 结构守卫
