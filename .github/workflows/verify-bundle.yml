@@ -40,72 +40,76 @@ jobs:
         id: detect
         shell: bash
         run: |
-          # 说明：bundle 的门禁本身以内容 sha256 为准（见 verify-unityplugin-bundle.mjs），
-          # 这里只负责回答“本次推送/PR 是否更新过 CHANGELOG”，用于内容不符时核对变更记录。
-          # 范围无法确定时明确失败，而不是静默跳过 —— 静默跳过会让该核对形同虚设。
+          # 说明：bundle 的硬门禁是内容 sha256（见 verify-unityplugin-bundle.mjs），
+          # 这里只负责回答“本次变更范围里是否出现过 bundle / CHANGELOG”。
+          # 范围一旦无法确定，就按“有变更”处理（changed=true）：宁可多要求一次
+          # CHANGELOG 记录，也不要在不确定时静默放行。任何情况下都不 fail 掉整个
+          # workflow —— 内容门禁是独立且恒定的，不该被范围推断的问题连坐。
           set -uo pipefail
 
           bundle='Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
           changelog='CHANGELOG.md'
           event='${{ github.event_name }}'
-          succeeded='false'
           changed_files=''
+          determinate='true'
 
-          diff_range() {
-            local old="$1" new="$2" out
+          # 返回 0 表示成功，结果写在 RESULT 里；1 表示范围不可达。
+          # 不用命令替换的 $? 判断，避免子 shell 状态带来的歧义。
+          RESULT=''
+          try_range() {
+            local old="$1" new="$2"
+            RESULT=''
             git rev-parse --verify --quiet "${old}^{commit}" >/dev/null || return 1
             git rev-parse --verify --quiet "${new}^{commit}" >/dev/null || return 1
-            out=$(git diff --name-only "$old" "$new") || return 1
-            printf '%s' "$out"
+            RESULT=$(git diff --name-only "$old" "$new") || return 1
+            return 0
           }
 
           if [ "$event" = 'pull_request' ]; then
             base='${{ github.event.pull_request.base.sha }}'
-            if changed_files=$(diff_range "$base" 'HEAD'); then
-              succeeded='true'
+            if try_range "$base" 'HEAD'; then
+              changed_files="$RESULT"
             else
               # base 不可达时退回与目标分支的合并基点
               git fetch --quiet origin '${{ github.base_ref }}' || true
-              if changed_files=$(diff_range 'FETCH_HEAD' 'HEAD'); then
-                succeeded='true'
+              if try_range 'FETCH_HEAD' 'HEAD'; then
+                changed_files="$RESULT"
+              else
+                determinate='false'
               fi
             fi
           elif [ "$event" = 'push' ]; then
             before='${{ github.event.before }}'
             after='${{ github.event.after }}'
             if [ -n "$before" ] && ! printf '%s' "$before" | grep -qE '^0+$'; then
-              # 常规推送：用推送前后的范围
-              if changed_files=$(diff_range "$before" "$after"); then
-                succeeded='true'
+              # 常规推送：推送前后的完整范围。
+              # 若 before 已不可达（历史被改写），不退回 after^..after —— 那只能覆盖
+              # 末次提交，会漏掉同一批推送里更早提交对 bundle 的改动，正是漏检的来源；
+              # 这种情况下直接判为不确定，走保守分支。
+              if try_range "$before" "$after"; then
+                changed_files="$RESULT"
+              else
+                determinate='false'
               fi
             else
-              # 新建分支：用推送后提交与其父提交的范围，覆盖整次推送
-              if changed_files=$(diff_range "${after}^" "$after"); then
-                succeeded='true'
+              # 新建分支：before 为全 0，after^..after 即该次推送的提交范围
+              if try_range "${after}^" "$after"; then
+                changed_files="$RESULT"
+              else
+                determinate='false'
               fi
             fi
-            if [ "$succeeded" != 'true' ]; then
-              # 非快进推送（历史改写）时 before 可能已不可达；fetch-depth 0 也不保证能取到
-              # 不可达的历史提交，此时退回“主分支相对 HEAD 的变更”，保留整批变更。
-              if changed_files=$(diff_range 'HEAD^' 'HEAD'); then
-                succeeded='true'
-              fi
-            fi
-          else
-            # 其他事件（如手工触发）没有可比对的范围，按全部变更处理，宁可多要求一次记录
-            succeeded='true'
           fi
-
-          if [ "$succeeded" != 'true' ]; then
-            echo "::error::无法确定本次变更范围，无法完成 CHANGELOG 核对（bundle 内容门禁仍会独立执行）"
-            exit 1
-          fi
+          # 其他事件（如手工触发）没有可比对的范围：同样按“有变更”处理
 
           changed='false'
           changelog_changed='false'
-          if [ -n "$changed_files" ]; then
+          if [ "$determinate" = 'true' ] && [ -n "$changed_files" ]; then
             printf '%s\n' "$changed_files" | grep -qx "$bundle" && changed='true' || true
             printf '%s\n' "$changed_files" | grep -qx "$changelog" && changelog_changed='true' || true
+          else
+            changed='true'
+            echo "::notice::本次未能确定变更范围，按“有变更”处理，要求同批变更包含 CHANGELOG 更新"
           fi
 
           {
@@ -113,6 +117,7 @@ jobs:
             echo "changelog_changed=$changelog_changed"
           } >> "$GITHUB_OUTPUT"
           echo "event: $event"
+          echo "determinate: $determinate"
           echo "bundle changed: $changed / changelog changed: $changelog_changed"
 
       - name: 运行 bundle 结构守卫
