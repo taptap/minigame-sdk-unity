@@ -7,6 +7,14 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [2.0.21] - 2026-09-23
+### Fixed
+1. 修复 release 环境下开启 wasm 分包的游戏启动报 `TypeError: undefined is not an object (evaluating 'e.downloadWasm')`，同步更新 UnityPlugin 运行时产物（bundle hash 22a58d65）
+2. 修复取消调试编译选项构建时 `preprocessSymbols failed`（找不到 `build.js.symbols`）导致构建中断，更新转换器 minihost-plugin.editor.dll
+
+### Added
+1. TJExtDef 新增 `TUANJIE_EMSCRIPTEN_3_1_39` 宏透传，支持团结引擎 tj 1.11 起 minigame/webgl/playableads 平台的 emscripten 版本升级
+
 ## [2.0.20] - 2026-08-03
 ### Changed
 1. 更新 UnityPlugin 引擎运行时编译产物
