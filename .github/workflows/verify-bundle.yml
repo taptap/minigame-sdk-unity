@@ -43,22 +43,38 @@ jobs:
           set -euo pipefail
           bundle='Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
           changelog='CHANGELOG.md'
-          changed='false'
-          changelog_changed='false'
+
+          # 按事件类型确定本次变更范围：pull_request 用 base..HEAD，
+          # push 用 before..after（直接推送同样要能检出，否则会跳过 CHANGELOG 核对）。
+          changed_files=''
           if [ "${{ github.event_name }}" = 'pull_request' ]; then
             base='${{ github.event.pull_request.base.sha }}'
-            changed_files=$(git diff --name-only "$base" HEAD)
-            if echo "$changed_files" | grep -qx "$bundle"; then
-              changed='true'
+            if git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+              changed_files=$(git diff --name-only "$base" HEAD)
             fi
-            if echo "$changed_files" | grep -qx "$changelog"; then
-              changelog_changed='true'
+          elif [ "${{ github.event_name }}" = 'push' ]; then
+            before='${{ github.event.before }}'
+            after='${{ github.event.after }}'
+            # 新建分支时 before 为全 0，此时退化为只看该 commit 自身
+            if [ -n "$before" ] && ! printf '%s' "$before" | grep -qE '^0+$'; then
+              changed_files=$(git diff --name-only "$before" "$after")
+            else
+              changed_files=$(git show --name-only --pretty=format: "$after")
             fi
           fi
+
+          changed='false'
+          changelog_changed='false'
+          if [ -n "$changed_files" ]; then
+            echo "$changed_files" | grep -qx "$bundle" && changed='true' || true
+            echo "$changed_files" | grep -qx "$changelog" && changelog_changed='true' || true
+          fi
+
           {
             echo "changed=$changed"
             echo "changelog_changed=$changelog_changed"
           } >> "$GITHUB_OUTPUT"
+          echo "event: ${{ github.event_name }}"
           echo "bundle changed: $changed / changelog changed: $changelog_changed"
 
       - name: 运行 bundle 结构守卫
