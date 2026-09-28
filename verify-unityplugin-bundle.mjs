@@ -121,18 +121,19 @@ function main() {
     hashOk ? '与 EXPECTED_BUNDLE_SHA256 一致' : `预期 ${EXPECTED_BUNDLE_SHA256.slice(0, 12)}… 实际 ${actualHash.slice(0, 12)}…`,
   ]);
 
-  // 3. bundle 有改动时必须同步记录变更。
-  //    注意这里不做 hash 的重复断言：上面的 hashOk 已无条件校验，若再拿它拼一条
-  //    与 BUNDLE_CHANGED 相与的断言，在 BUNDLE_CHANGED 为真时完全等价、为假时恒过，
-  //    属于无独立信息的冗余检查。bundle 变更时真正的缺口是变更记录。
-  if (BUNDLE_CHANGED) {
+  // 3. 内容与预期不符时，必须能看到同一批变更里的 CHANGELOG 更新。
+  //    判据刻意用“内容是否相符”而不是“本次 diff 是否包含 bundle”：范围推断在历史
+  //    改写、多提交推送、base 不可达等情况下都可能失真，内容比较不会。
+  //    这里也不做 hash 的重复断言 —— 上面的 hashOk 已无条件校验，再拿它拼一条与
+  //    BUNDLE_CHANGED 相与的断言，为真时等价、为假时恒过，没有独立信息。
+  if (!hashOk) {
     checks.push([
-      'bundle 变更时同步更新了 CHANGELOG',
+      'bundle 内容变更时同步更新了 CHANGELOG',
       CHANGELOG_CHANGED,
       CHANGELOG_CHANGED ? 'CHANGELOG.md 有改动' : '缺少 CHANGELOG.md 变更',
     ]);
-  } else {
-    console.log('INFO  本次未变更 bundle，跳过 CHANGELOG 核对');
+  } else if (BUNDLE_CHANGED || CHANGELOG_CHANGED) {
+    console.log('INFO  本次变更未涉及 bundle 内容不符，CHANGELOG 核对不适用');
   }
 
   return report(checks) ? 1 : 0;
