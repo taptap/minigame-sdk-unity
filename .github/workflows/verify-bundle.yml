@@ -1,0 +1,56 @@
+name: Verify UnityPlugin bundle
+
+# Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js 是整体替换的 minified 构建产物，
+# 曾在 release 环境触发 e.downloadWasm 启动异常。这里确保结构守卫会自动执行，
+# 避免后续替换 bundle 时修复被静默覆盖。
+
+on:
+  pull_request:
+    paths:
+      - 'Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
+      - 'verify-unityplugin-bundle.mjs'
+      - '.github/workflows/verify-bundle.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
+      - 'verify-unityplugin-bundle.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 检测本次是否改动了 bundle
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle='Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
+          changed='false'
+          if [ "${{ github.event_name }}" = 'pull_request' ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            if git diff --name-only "$base" HEAD | grep -qx "$bundle"; then
+              changed='true'
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "bundle changed: $changed"
+
+      - name: 运行 bundle 结构守卫
+        env:
+          BUNDLE_CHANGED: ${{ steps.detect.outputs.changed }}
+        run: node verify-unityplugin-bundle.mjs
