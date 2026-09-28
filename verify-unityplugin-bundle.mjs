@@ -11,10 +11,11 @@
 // 所以这里只做结构断言：bundle 一变更就检查关键不变式还在不在，避免修复被静默覆盖。
 //
 // 用法：node verify-unityplugin-bundle.mjs
-// 退出码：0 = 全部通过；1 = 有不变式被破坏或 bundle 无法解析
+// 退出码：0 = 全部通过；1 = 有不变式被破坏、bundle 无法解析，或 bundle 内容与预期不符
 
 import vm from 'node:vm';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,15 @@ const BUNDLE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   'Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
 );
+
+// bundle 的预期 sha256。更换 bundle 时，确认变更内容与 CHANGELOG 后更新此值。
+// 下面的断言会无条件核对它（本地运行同样生效），不需要 workflow 参与。
+const EXPECTED_BUNDLE_SHA256 =
+  '206a07a2043a67aaab49bac738594a62f59008393a6d0ea6e4e73292dc59eb60';
+
+// 由 workflow 在检测到本次变更了 bundle / CHANGELOG 时传入；本地运行时不会设置。
+const BUNDLE_CHANGED = process.env.BUNDLE_CHANGED === 'true';
+const CHANGELOG_CHANGED = process.env.CHANGELOG_CHANGED === 'true';
 
 // 监控开启时仍要走原逻辑
 const SHOW_RESULT_GUARD =
@@ -94,9 +104,36 @@ function main() {
     console.log(`INFO  UnityPluginVersion: ${version[1]}`);
   }
 
-  // 该 hash 变化说明上游重新出了 bundle，需要人工确认后更新本行注释与 CHANGELOG
-  console.log('INFO  若上一步 hash 发生变化，请人工确认本次 bundle 变更并同步 CHANGELOG');
   checks.push(['未回退到旧版拼写错误的 receivedBytedCount', !source.includes('receivedBytedCount')]);
+
+  // 2. 内容核对：bundle 是整体替换的产物，必须与预期 hash 一致，
+  //    否则说明换入了未经确认的 bundle（即使它恰好保留了上面的结构）。
+  const actualHash = crypto.createHash('sha256').update(source).digest('hex');
+  console.log(`INFO  bundle sha256: ${actualHash}`);
+  const hashOk = actualHash === EXPECTED_BUNDLE_SHA256;
+  if (!hashOk) {
+    console.log('      更新方式：确认本次 bundle 变更内容与 CHANGELOG 后，');
+    console.log(`      将脚本中的 EXPECTED_BUNDLE_SHA256 改为 ${actualHash}`);
+  }
+  checks.push([
+    'bundle 内容与预期 sha256 一致',
+    hashOk,
+    hashOk ? '与 EXPECTED_BUNDLE_SHA256 一致' : `预期 ${EXPECTED_BUNDLE_SHA256.slice(0, 12)}… 实际 ${actualHash.slice(0, 12)}…`,
+  ]);
+
+  // 3. bundle 有改动时必须同步记录变更。
+  //    注意这里不做 hash 的重复断言：上面的 hashOk 已无条件校验，若再拿它拼一条
+  //    与 BUNDLE_CHANGED 相与的断言，在 BUNDLE_CHANGED 为真时完全等价、为假时恒过，
+  //    属于无独立信息的冗余检查。bundle 变更时真正的缺口是变更记录。
+  if (BUNDLE_CHANGED) {
+    checks.push([
+      'bundle 变更时同步更新了 CHANGELOG',
+      CHANGELOG_CHANGED,
+      CHANGELOG_CHANGED ? 'CHANGELOG.md 有改动' : '缺少 CHANGELOG.md 变更',
+    ]);
+  } else {
+    console.log('INFO  本次未变更 bundle，跳过 CHANGELOG 核对');
+  }
 
   return report(checks) ? 1 : 0;
 }
