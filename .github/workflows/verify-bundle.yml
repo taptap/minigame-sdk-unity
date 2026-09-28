@@ -17,6 +17,7 @@ on:
     paths:
       - 'Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
       - 'verify-unityplugin-bundle.mjs'
+      - '.github/workflows/verify-bundle.yml'
 
 permissions:
   contents: read
@@ -26,31 +27,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      # 固定到 commit SHA，避免 action 的可变 tag 被重新指向后执行不同代码
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
 
-      - name: 检测本次是否改动了 bundle
+      - name: 检测本次是否改动了 bundle 与 CHANGELOG
         id: detect
         shell: bash
         run: |
           set -euo pipefail
           bundle='Runtime/minigame-default/cachedPlugin/UnityPlugin/index.js'
+          changelog='CHANGELOG.md'
           changed='false'
+          changelog_changed='false'
           if [ "${{ github.event_name }}" = 'pull_request' ]; then
             base='${{ github.event.pull_request.base.sha }}'
-            if git diff --name-only "$base" HEAD | grep -qx "$bundle"; then
+            changed_files=$(git diff --name-only "$base" HEAD)
+            if echo "$changed_files" | grep -qx "$bundle"; then
               changed='true'
             fi
+            if echo "$changed_files" | grep -qx "$changelog"; then
+              changelog_changed='true'
+            fi
           fi
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
-          echo "bundle changed: $changed"
+          {
+            echo "changed=$changed"
+            echo "changelog_changed=$changelog_changed"
+          } >> "$GITHUB_OUTPUT"
+          echo "bundle changed: $changed / changelog changed: $changelog_changed"
 
       - name: 运行 bundle 结构守卫
         env:
           BUNDLE_CHANGED: ${{ steps.detect.outputs.changed }}
+          CHANGELOG_CHANGED: ${{ steps.detect.outputs.changelog_changed }}
         run: node verify-unityplugin-bundle.mjs

@@ -25,13 +25,13 @@ const BUNDLE = path.join(
 );
 
 // bundle 的预期 sha256。更换 bundle 时，确认变更内容与 CHANGELOG 后更新此值。
-// CI 会在 bundle 文件变更时强制核对它（见 .github/workflows/verify-bundle.yml）。
+// 下面的断言会无条件核对它（本地运行同样生效），不需要 workflow 参与。
 const EXPECTED_BUNDLE_SHA256 =
   '206a07a2043a67aaab49bac738594a62f59008393a6d0ea6e4e73292dc59eb60';
 
-// 由 workflow 在检测到 bundle 变更时置为 'true'；本地运行时不会设置。
+// 由 workflow 在检测到本次变更了 bundle / CHANGELOG 时传入；本地运行时不会设置。
 const BUNDLE_CHANGED = process.env.BUNDLE_CHANGED === 'true';
-
+const CHANGELOG_CHANGED = process.env.CHANGELOG_CHANGED === 'true';
 
 // 监控开启时仍要走原逻辑
 const SHOW_RESULT_GUARD =
@@ -121,12 +121,19 @@ function main() {
     hashOk ? '与 EXPECTED_BUNDLE_SHA256 一致' : `预期 ${EXPECTED_BUNDLE_SHA256.slice(0, 12)}… 实际 ${actualHash.slice(0, 12)}…`,
   ]);
 
-  // 3. bundle 有改动时不允许“只改 bundle 不改预期 hash”蒙混过关
-  checks.push([
-    'bundle 变更时已同步更新预期 sha256',
-    !BUNDLE_CHANGED || hashOk,
-    BUNDLE_CHANGED ? '检测到 bundle 文件变更' : '本次无 bundle 变更，跳过',
-  ]);
+  // 3. bundle 有改动时必须同步记录变更。
+  //    注意这里不做 hash 的重复断言：上面的 hashOk 已无条件校验，若再拿它拼一条
+  //    与 BUNDLE_CHANGED 相与的断言，在 BUNDLE_CHANGED 为真时完全等价、为假时恒过，
+  //    属于无独立信息的冗余检查。bundle 变更时真正的缺口是变更记录。
+  if (BUNDLE_CHANGED) {
+    checks.push([
+      'bundle 变更时同步更新了 CHANGELOG',
+      CHANGELOG_CHANGED,
+      CHANGELOG_CHANGED ? 'CHANGELOG.md 有改动' : '缺少 CHANGELOG.md 变更',
+    ]);
+  } else {
+    console.log('INFO  本次未变更 bundle，跳过 CHANGELOG 核对');
+  }
 
   return report(checks) ? 1 : 0;
 }
